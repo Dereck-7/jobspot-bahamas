@@ -1,0 +1,38 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions
+    function isAuth() {
+      return request.auth != null;
+    }
+    
+    function isValidResume() {
+      return request.resource.contentType.matches('application/pdf') ||
+             request.resource.contentType.matches('application/msword') ||
+             request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.wordprocessingml.document') &&
+             request.resource.size < 5 * 1024 * 1024; // 5MB max
+    }
+
+    // Resume storage rules
+    match /resumes/{userId}/{fileName} {
+      allow read: if isAuth() && (
+        request.auth.uid == userId || // Owner
+        resource.metadata.jobId != null && // If it's attached to a job application
+        get(/databases/$(database)/documents/jobs/$(resource.metadata.jobId)).data.userId == request.auth.uid // Job poster
+      );
+      allow create: if isAuth() &&
+        request.auth.uid == userId &&
+        isValidResume();
+      allow delete: if isAuth() && request.auth.uid == userId;
+    }
+
+    // Company logos
+    match /companies/{companyId}/{fileName} {
+      allow read: if true;
+      allow write: if isAuth() &&
+        get(/databases/$(database)/documents/companies/$(companyId)).data.ownerId == request.auth.uid &&
+        request.resource.contentType.matches('image/*') &&
+        request.resource.size < 2 * 1024 * 1024; // 2MB max
+    }
+  }
+}

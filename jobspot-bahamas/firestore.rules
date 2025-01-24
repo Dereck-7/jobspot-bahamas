@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuth() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    function isValidJob() {
+      let job = request.resource.data;
+      return job.title.size() > 0 
+        && job.company.size() > 0 
+        && job.location.size() > 0;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isOwner(userId);
+      allow update: if isAuth() && isOwner(userId);
+      allow delete: if isAuth() && isOwner(userId);
+
+      // User notifications subcollection
+      match /notifications/{notificationId} {
+        allow read: if isAuth() && isOwner(userId);
+        allow write: if false; // Only written by server
+      }
+    }
+    
+    // Job listings
+    match /jobs/{jobId} {
+      allow read: if true; // Public read access
+      allow create: if isAuth() && isValidJob();
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+      
+      // Job applications subcollection
+      match /applications/{applicationId} {
+        allow read: if isAuth() && (
+          isOwner(resource.data.userId) || // Applicant
+          resource.data.employerId == request.auth.uid || // Employer
+          get(/databases/$(database)/documents/jobs/$(jobId)).data.userId == request.auth.uid // Job poster
+        );
+        allow create: if isAuth() && !exists(/databases/$(database)/documents/jobs/$(jobId)/applications/$(applicationId));
+        allow update: if isAuth() && (
+          isOwner(resource.data.userId) || // Applicant can update their application
+          get(/databases/$(database)/documents/jobs/$(jobId)).data.userId == request.auth.uid // Job poster can update status
+        );
+        allow delete: if isAuth() && isOwner(resource.data.userId);
+      }
+
+      // Job analytics subcollection
+      match /analytics/{docId} {
+        allow read: if isAuth() && resource.data.userId == request.auth.uid;
+        allow write: if false; // Only written by server
+      }
+    }
+    
+    // Company profiles
+    match /companies/{companyId} {
+      allow read: if true;
+      allow create: if isAuth();
+      allow update: if isAuth() && resource.data.ownerId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Job categories (read-only reference data)
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Job locations (read-only reference data)
+    match /locations/{locationId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
